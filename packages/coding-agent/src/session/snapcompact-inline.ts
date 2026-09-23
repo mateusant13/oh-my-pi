@@ -9,9 +9,11 @@
  * `SessionMessageEntry` messages, so mutation would leak rendered images
  * into session.jsonl.
  *
- * The swap policy (budget, savings gate, skip rules) lives in
+ * The base swap policy (budget, savings gate, skip rules) lives in
  * `planInlineSwaps`, shared by the transform and the `/context` savings
- * estimate (`estimateInlineSavings`) so the two can never disagree.
+ * estimate (`estimateInlineSavings`). The estimate is intentionally
+ * freeze-blind: transformer history is stateful and is disclosed at its
+ * callsite rather than guessed from the current message list.
  */
 
 import { Tokenizer } from "@oh-my-pi/pi-agent-core";
@@ -515,23 +517,23 @@ export class SnapcompactInlineTransformer {
 			}
 		}
 
-	// Frozen system-prompt spend reserves budget before planning: the replay
-	// below re-attaches those frames regardless of today's verdict, so new
-	// first-send swaps must fit around them — otherwise the request total
-	// exceeds the provider cap and the downstream clamp drops the oldest
-	// images first (exactly the frozen ones).
-	const committedSystemFrames = this.#sentSystemPrompt
-		? snapcompact.frames(this.#sentSystemPrompt.text, { shape })
-		: 0;
-	const userIndex = messages.findIndex(message => message.role === "user");
-	const plan = planInlineSwaps({
-		options: this.options,
-		shape,
-		budget: budget - committedSystemFrames,
-		toolResults: candidates,
-		systemPrompt: systemPromptCandidate,
-		hasUserMessage: userIndex >= 0,
-	});
+		// Frozen system-prompt spend reserves budget before planning: the replay
+		// below re-attaches those frames regardless of today's verdict, so new
+		// first-send swaps must fit around them — otherwise the request total
+		// exceeds the provider cap and the downstream clamp drops the oldest
+		// images first (exactly the frozen ones).
+		const committedSystemFrames = this.#sentSystemPrompt
+			? snapcompact.frames(this.#sentSystemPrompt.text, { shape })
+			: 0;
+		const userIndex = messages.findIndex(message => message.role === "user");
+		const plan = planInlineSwaps({
+			options: this.options,
+			shape,
+			budget: budget - committedSystemFrames,
+			toolResults: candidates,
+			systemPrompt: systemPromptCandidate,
+			hasUserMessage: userIndex >= 0,
+		});
 
 		// Freeze at first send (see #sentRender): a tool result already in the
 		// sent prefix keeps the representation it shipped with; only items
