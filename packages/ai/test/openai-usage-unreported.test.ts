@@ -28,12 +28,7 @@
 import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { populateResponsesUsageFromResponse } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import type {
-	AssistantMessage,
-	Model,
-	ModelSpec,
-	Usage,
-} from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Model, ModelSpec, Usage } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 

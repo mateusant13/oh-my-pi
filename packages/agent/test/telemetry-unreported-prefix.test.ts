@@ -49,7 +49,10 @@ function sseResponse(events: Array<Record<string, unknown>>): Response {
 }
 
 /** One streaming turn. `startUsage`/`deltaUsage` are the wire usage objects; omission flags `unreported`. */
-function streamingTurn(startUsage: Record<string, unknown>, deltaUsage: Record<string, unknown>): Array<Record<string, unknown>> {
+function streamingTurn(
+	startUsage: Record<string, unknown>,
+	deltaUsage: Record<string, unknown>,
+): Array<Record<string, unknown>> {
 	return [
 		{ type: "message_start", message: { id: "msg_turn", usage: startUsage } },
 		{ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
@@ -133,7 +136,10 @@ describe("telemetry must not stamp or warn from unreported cache buckets (produc
 		// Turn 2: provider omits BOTH cache fields — genuine unknown, not a 0 read.
 		const second = await streamTurn({ input_tokens: 1700 }, { output_tokens: 60 });
 		recordSentPayload(telemetry.config, {
-			messages: [{ role: "user", content: "first" }, { role: "user", content: "second" }],
+			messages: [
+				{ role: "user", content: "first" },
+				{ role: "user", content: "second" },
+			],
 		});
 		const span2 = tracer.startSpan("chat turn2");
 		await finishChatSpan(telemetry, span2, second, { stepNumber: 1 });
@@ -162,7 +168,10 @@ describe("telemetry must not stamp or warn from unreported cache buckets (produc
 		// Turn 2: read 300 measured, write OMITTED — read stays truthful, write is unknown.
 		const second = await streamTurn({ input_tokens: 1500, cache_read_input_tokens: 300 }, { output_tokens: 40 });
 		recordSentPayload(telemetry.config, {
-			messages: [{ role: "user", content: "first" }, { role: "user", content: "second" }],
+			messages: [
+				{ role: "user", content: "first" },
+				{ role: "user", content: "second" },
+			],
 		});
 		const span2 = tracer.startSpan("chat turn2");
 		await finishChatSpan(telemetry, span2, second, { stepNumber: 1 });
@@ -209,7 +218,10 @@ describe("telemetry must not stamp or warn from unreported cache buckets (produc
 			{ output_tokens: 40 },
 		);
 		recordSentPayload(telemetry.config, {
-			messages: [{ role: "user", content: "first" }, { role: "user", content: "second" }],
+			messages: [
+				{ role: "user", content: "first" },
+				{ role: "user", content: "second" },
+			],
 		});
 		const span2 = tracer.startSpan("chat turn2");
 		await finishChatSpan(telemetry, span2, second, { stepNumber: 1 });

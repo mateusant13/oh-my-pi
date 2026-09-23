@@ -772,15 +772,15 @@ export function applyOpenAIExtraBody<P extends object>(
  * sampling extras). Lives in the shared module beside the request-shaping
  * helpers that mutate it.
  */
-	export type OpenAICompletionsParams = Omit<ChatCompletionCreateParamsStreaming, "reasoning_effort" | "service_tier"> & {
-		top_k?: number;
-		min_p?: number;
-		repetition_penalty?: number;
-		thinking?: { type: "enabled" | "disabled"; effort?: string; keep?: "all" };
+export type OpenAICompletionsParams = Omit<ChatCompletionCreateParamsStreaming, "reasoning_effort" | "service_tier"> & {
+	top_k?: number;
+	min_p?: number;
+	repetition_penalty?: number;
+	thinking?: { type: "enabled" | "disabled"; effort?: string; keep?: "all" };
+	enable_thinking?: boolean;
+	preserve_thinking?: boolean;
+	chat_template_kwargs?: {
 		enable_thinking?: boolean;
-		preserve_thinking?: boolean;
-		chat_template_kwargs?: {
-			enable_thinking?: boolean;
 		thinking?: boolean;
 		preserve_thinking?: boolean;
 		reasoning_effort?: string;

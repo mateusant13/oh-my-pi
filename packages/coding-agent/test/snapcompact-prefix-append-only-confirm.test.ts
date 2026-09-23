@@ -282,13 +282,13 @@ describe("P1b: before_provider_request rewrite detection", () => {
 		if (bodiesFor(0).length === 0 || bodiesFor(1).length === 0) {
 			throw new Error(`Expected a captured wire body per drive, got ${JSON.stringify(sentBodies.length)} total`);
 		}
-	const itemZero = (body: string): string => {
-		const parsed: unknown = JSON.parse(body);
-		if (!parsed || typeof parsed !== "object" || !("messages" in parsed) || !Array.isArray(parsed.messages)) {
-			throw new Error("Expected the captured wire body to carry a messages array");
-		}
-		return JSON.stringify(parsed.messages[0]);
-	};
+		const itemZero = (body: string): string => {
+			const parsed: unknown = JSON.parse(body);
+			if (!parsed || typeof parsed !== "object" || !("messages" in parsed) || !Array.isArray(parsed.messages)) {
+				throw new Error("Expected the captured wire body to carry a messages array");
+			}
+			return JSON.stringify(parsed.messages[0]);
+		};
 		// Observation 1: the hook's mutation reaches the wire body that is actually sent.
 		expect(bodiesFor(0)[0]).toContain("[hook-ts:");
 		// Observation 2: the already-sent item differs between the two otherwise identical requests.

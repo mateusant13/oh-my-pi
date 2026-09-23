@@ -27,7 +27,9 @@ class KeyedOperationLane<Key> {
 	async acquire(key: Key): Promise<() => void> {
 		const previous = this.tails.get(key) ?? Promise.resolve();
 		let releaseGate: () => void = () => undefined;
-		const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+		const gate = new Promise<void>(resolve => {
+			releaseGate = resolve;
+		});
 		const current = waitForLane(previous, gate);
 		this.tails.set(key, current);
 		await ignoreLaneFailure(previous);
@@ -56,7 +58,11 @@ async function waitForLane(previous: Promise<void>, gate: Promise<void>): Promis
 }
 
 async function ignoreLaneFailure(lane: Promise<void>): Promise<void> {
-	try { await lane; } catch { /* predecessor failure does not poison this key */ }
+	try {
+		await lane;
+	} catch {
+		/* predecessor failure does not poison this key */
+	}
 }
 
 /** Serializes operations per key; independent keys remain parallel. */
