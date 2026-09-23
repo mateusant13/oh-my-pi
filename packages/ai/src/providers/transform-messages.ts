@@ -248,9 +248,9 @@ function deduplicateToolCallIds(
 }
 
 /**
- * Drop assistant `toolCall` blocks whose `id` or `name` is empty / whitespace-only,
- * the `toolResult` messages they point at, and any assistant turn that has no
- * replayable content left.
+ * Drop assistant `toolCall` blocks whose `id` is empty / whitespace-only or
+ * whose `name` fails `^[a-zA-Z0-9_-]{1,64}$`, the `toolResult` messages they
+ * point at, and any assistant turn that has no replayable content left.
  *
  * Models occasionally emit malformed calls such as `{ "name": "", "arguments": "{}" }`
  * (observed: GLM-5.2 + thinking on long turns, #3458) or a structurally valid
@@ -263,12 +263,28 @@ function deduplicateToolCallIds(
  * `tool_calls[i].function.*` — wedging the session in a 400 loop until manual
  * `/clear`.
  *
+ * Name-pattern invariant (2026-09-23): models also persist hallucinated names
+ * such as `b=read` and `history://x` — `agent-loop.ts:2315/2640` only rejects
+ * them at execution time, so the block and its `Tool ... not found` result
+ * stay in history and are replayed forever. The guard enforces
+ * `^[a-zA-Z0-9_-]{1,64}$`, the intersection of every provider regex on the
+ * replay path: muse `^[a-zA-Z0-9_.-]+$` and codex `^[a-zA-Z0-9_-]+$` are the
+ * two patterns that 400'd lanes on `b=read` (`=` matches neither), and
+ * anthropic / openai / meta add the 64-char cap
+ * (`docs/toolconv/anthropic.md:90`, `mcp/tool-bridge.ts`
+ * `MAX_MCP_TOOL_NAME_LENGTH`). Anything wider still 400s codex/anthropic/
+ * cursor routes; anything narrower would drop registered names (`ast_edit`,
+ * `mcp__gpt_ask`).
+ *
  * Run before any other transform so the rest of the pipeline never sees a
  * malformed call. Idempotent: a re-run on an already-sanitized list returns
  * the input untouched. Provider-agnostic — any wire model could surface this.
  */
 function isMalformedToolCallName(name: string | undefined): boolean {
-	return !name || name.trim().length === 0;
+	// `!name` is load-bearing: it catches `undefined` (RegExp.test would coerce
+	// it to the passing string "undefined") and `""`; whitespace and every
+	// other charset violation fail the pattern itself.
+	return !name || !/^[a-zA-Z0-9_-]{1,64}$/.test(name);
 }
 
 function isMalformedToolCallId(id: string | undefined): boolean {
@@ -598,10 +614,10 @@ export function transformMessages<TApi extends Api>(
 	// block errors from LLM providers (e.g. invalid_prompt).
 	messages = redactSensitiveCredentialsInMessages(messages);
 
-	// Drop assistant `toolCall` blocks with empty/whitespace `id` or `name`
-	// (and their matched `toolResult` messages) before anything else looks at
-	// the history. Replays of these would 400 every provider — see
-	// `sanitizeMalformedToolCalls`.
+	// Drop assistant `toolCall` blocks with empty/whitespace `id` or a `name`
+	// outside `^[a-zA-Z0-9_-]{1,64}$` (and their matched `toolResult` messages)
+	// before anything else looks at the history. Replays of these would 400
+	// every provider — see `sanitizeMalformedToolCalls`.
 	messages = sanitizeMalformedToolCalls(messages);
 
 	// Build a map of original tool call IDs to normalized IDs

@@ -273,6 +273,120 @@ describe("transformMessages drops malformed (empty-name) tool calls", () => {
 	});
 });
 
+// 2026-09-23: a model hallucinated the tool name `b=read`; the block and its
+// `Tool b=read not found` result persisted in session history and 400'd two
+// lanes to death on every pattern-enforcing provider (muse
+// `^[a-zA-Z0-9_.-]+$`, codex `^[a-zA-Z0-9_-]+$` — `=` matches neither) until
+// the guard widened beyond emptiness. The boundary is still `transformMessages`.
+describe("transformMessages drops tool names outside the provider pattern", () => {
+	it("drops the persisted b=read tool-call block and its 'not found' result before the wire", () => {
+		const poisonId = "call_a9b29902f7e045c99342b3e9";
+		const messages: Message[] = [
+			{ role: "user", content: "Run the cache-rate report", timestamp: 1 },
+			assistant(
+				[
+					{ type: "text", text: "Reading the script." },
+					{
+						type: "toolCall",
+						id: poisonId,
+						name: "b=read",
+						arguments: {
+							i: "Reading house cache-rate target script",
+							path: "G:/superharness/scripts/cache-rate-report.sh",
+						},
+					},
+				],
+				2,
+			),
+			{
+				role: "toolResult",
+				toolCallId: poisonId,
+				toolName: "b=read",
+				content: [{ type: "text", text: "Tool b=read not found" }],
+				isError: true,
+				timestamp: 3,
+			},
+			{ role: "user", content: "continue", timestamp: 4 },
+		];
+
+		const transformed = transformMessages(messages, model);
+
+		// POST-fix: no name reaching the wire violates the provider pattern —
+		// this is the assertion that fails when the guard is reverse-applied.
+		const violators = getToolCalls(transformed).filter(tc => !/^[a-zA-Z0-9_-]{1,64}$/.test(tc.name));
+		expect(violators).toHaveLength(0);
+
+		// Drop semantics: the paired "Tool b=read not found" result must go with
+		// the call (Anthropic 400s on a tool_result without its tool_use).
+		expect(transformed.find(m => m.role === "toolResult" && m.toolCallId === poisonId)).toBeUndefined();
+
+		// Turn pairing stays consistent: prose on the assistant turn and the
+		// continuation survive verbatim.
+		const assistantOut = transformed.find((m): m is AssistantMessage => m.role === "assistant");
+		expect(assistantOut?.content).toEqual([{ type: "text", text: "Reading the script." }]);
+		expect(transformed.findLast(m => m.role === "user")).toMatchObject({ role: "user", content: "continue" });
+	});
+
+	it("drops every known violator class and keeps registered names", () => {
+		const badNames = [
+			"history://TodoLeftoverCensus", // `:` and `/` — sister dump class
+			"agent://TodoLeftoverCensus</arg_value>", // XML leak from the same scans
+			"b read", // embedded space
+			"fs.read", // dot — passes muse, fails codex/anthropic/openai-meta
+			"x".repeat(65), // anthropic/openai-meta 64-char cap
+		];
+		const goodNames = ["read", "ast_edit", "mcp__gpt_ask", "yield", "a-b_c"];
+		const messages: Message[] = [
+			{ role: "user", content: "exercise the guard", timestamp: 1 },
+			assistant(
+				badNames.map((name, i) => ({ type: "toolCall" as const, id: `bad_${i}`, name, arguments: {} })),
+				2,
+			),
+			...badNames.map((name, i) => ({
+				role: "toolResult" as const,
+				toolCallId: `bad_${i}`,
+				toolName: name,
+				content: [{ type: "text" as const, text: `Tool ${name} not found` }],
+				isError: true,
+				timestamp: 3,
+			})),
+			assistant(
+				goodNames.map((name, i) => ({
+					type: "toolCall" as const,
+					id: `good_${i}`,
+					name,
+					arguments: { path: "ok" },
+				})),
+				4,
+			),
+			...goodNames.map((name, i) => ({
+				role: "toolResult" as const,
+				toolCallId: `good_${i}`,
+				toolName: name,
+				content: [{ type: "text" as const, text: `ok ${name}` }],
+				isError: false,
+				timestamp: 5,
+			})),
+			{ role: "user" as const, content: "continue", timestamp: 6 },
+		];
+
+		const transformed = transformMessages(messages, model);
+
+		const survivingCalls = getToolCalls(transformed);
+		const survivingNames = survivingCalls.map(tc => tc.name);
+		// No violator class survives; every registered-shape name does.
+		expect(survivingNames.filter(name => badNames.includes(name))).toEqual([]);
+		expect(survivingNames).toEqual(goodNames);
+
+		// Every dropped call's paired result is gone with it — no orphans.
+		const survivingResultIds = transformed
+			.filter((m): m is ToolResultMessage => m.role === "toolResult")
+			.map(m => m.toolCallId);
+		expect(survivingResultIds.filter(id => id.startsWith("bad_"))).toEqual([]);
+		expect(survivingResultIds.filter(id => id.startsWith("good_"))).toHaveLength(goodNames.length);
+	});
+});
+
 describe("transformMessages drops assistant images from provider replay", () => {
 	it("preserves replayable text while removing native image artifacts", () => {
 		const messages: Message[] = [
