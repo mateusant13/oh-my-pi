@@ -193,7 +193,7 @@ async function driveTwoTurns(options: DriveOptions): Promise<DriveResult> {
 		const url = input instanceof Request ? input.url : String(input);
 		seenUrls.push(url);
 		if (!url.includes("/v1/messages")) return nativeFetch(input, init);
-		const request = input instanceof Request ? input : new Request(input, init);
+		const request = input instanceof Request ? input : new Request(input instanceof URL ? input.href : input, init);
 		wireBodies.push(await request.text());
 		const usage = options.usageByTurn[wireBodies.length - 1] ?? options.usageByTurn[options.usageByTurn.length - 1]!;
 		return anthropicSse(model.id, usage);

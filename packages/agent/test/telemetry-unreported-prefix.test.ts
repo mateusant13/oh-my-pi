@@ -21,7 +21,16 @@ import {
 import type { Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { logger } from "@oh-my-pi/pi-utils";
-import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+// Invariant: the sdk SpanImpl behind tracer.startSpan() IS both of these — the api Span
+// that finishChatSpan()/end() take, and the ReadableSpan view that carries the recorded
+// `attributes` this test asserts on (the api Span type itself only exposes the setters).
+import type { Span } from "@opentelemetry/api";
+import {
+	BasicTracerProvider,
+	InMemorySpanExporter,
+	type ReadableSpan,
+	SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 
 const model: Model<"anthropic-messages"> = buildModel({
 	id: "claude-sonnet-4-6",
@@ -68,7 +77,8 @@ async function streamTurn(
 	deltaUsage: Record<string, unknown>,
 ): Promise<AssistantMessage> {
 	const stream = streamSimple(model, context, {
-		fetch: (async () => sseResponse(streamingTurn(startUsage, deltaUsage))) as typeof fetch,
+		// Invariant: the stub ignores fetch's arguments and never touches the `preconnect` static — the transport only consumes the returned SSE Response.
+		fetch: (async () => sseResponse(streamingTurn(startUsage, deltaUsage))) as unknown as typeof fetch,
 		apiKey: "test-anthropic-key",
 	});
 	return stream.result();
@@ -129,7 +139,7 @@ describe("telemetry must not stamp or warn from unreported cache buckets (produc
 			{ output_tokens: 50 },
 		);
 		recordSentPayload(telemetry.config, { messages: [{ role: "user", content: "first" }] });
-		const span1 = tracer.startSpan("chat turn1");
+		const span1 = tracer.startSpan("chat turn1") as Span & ReadableSpan;
 		await finishChatSpan(telemetry, span1, first, { stepNumber: 0 });
 		span1.end();
 
@@ -141,7 +151,7 @@ describe("telemetry must not stamp or warn from unreported cache buckets (produc
 				{ role: "user", content: "second" },
 			],
 		});
-		const span2 = tracer.startSpan("chat turn2");
+		const span2 = tracer.startSpan("chat turn2") as Span & ReadableSpan;
 		await finishChatSpan(telemetry, span2, second, { stepNumber: 1 });
 		span2.end();
 
@@ -190,7 +200,7 @@ describe("telemetry must not stamp or warn from unreported cache buckets (produc
 				{ role: "user", content: "third" },
 			],
 		});
-		const span3 = tracer.startSpan("chat turn3");
+		const span3 = tracer.startSpan("chat turn3") as Span & ReadableSpan;
 		await finishChatSpan(telemetry, span3, third, { stepNumber: 2 });
 		span3.end();
 
@@ -223,7 +233,7 @@ describe("telemetry must not stamp or warn from unreported cache buckets (produc
 				{ role: "user", content: "second" },
 			],
 		});
-		const span2 = tracer.startSpan("chat turn2");
+		const span2 = tracer.startSpan("chat turn2") as Span & ReadableSpan;
 		await finishChatSpan(telemetry, span2, second, { stepNumber: 1 });
 		span2.end();
 

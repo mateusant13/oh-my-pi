@@ -32,6 +32,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
+import type { FetchInput } from "./helpers/fetch-mock";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
 
 /** Same dense-text recipe as snapcompact-inline.test.ts: spans ~2 frames, clears
@@ -228,7 +229,7 @@ describe("P1b: before_provider_request rewrite detection", () => {
 			systemPrompt: ["sys"],
 			messages: [
 				{ role: "user", content: [{ type: "text", text: "already-sent item zero" }], timestamp: 1 },
-				{ role: "assistant", content: [{ type: "text", text: "ack" }], timestamp: 2 },
+				{ ...createAssistantMessage("ack"), timestamp: 2 },
 				{ role: "user", content: [{ type: "text", text: "second user turn" }], timestamp: 3 },
 			],
 		};
@@ -243,8 +244,9 @@ describe("P1b: before_provider_request rewrite detection", () => {
 		});
 		const sentBodies: Array<{ drive: number; body: string }> = [];
 		let drive = 0;
-		const captureFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-			const request = input instanceof Request ? input : new Request(input, init);
+		const captureFetch = async (input: FetchInput, init?: RequestInit): Promise<Response> => {
+			const request =
+				input instanceof Request ? input : new Request(input instanceof URL ? input.href : input, init);
 			sentBodies.push({ drive, body: await request.text() });
 			return new Response(
 				JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "capture-only" } }),

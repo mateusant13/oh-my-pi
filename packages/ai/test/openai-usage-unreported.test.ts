@@ -28,7 +28,7 @@
 import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { populateResponsesUsageFromResponse } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import type { AssistantMessage, Model, ModelSpec, Usage } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Context, Model, ModelSpec, Usage } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 
@@ -80,7 +80,7 @@ async function streamUsage(usage: Record<string, unknown>): Promise<Usage> {
 		const payload = `${events.map(event => `data: ${typeof event === "string" ? event : JSON.stringify(event)}`).join("\n\n")}\n\n`;
 		return new Response(payload, { status: 200, headers: { "content-type": "text/event-stream" } });
 	}
-	const context = { messages: [{ role: "user", content: "hello", timestamp: Date.now() }] };
+	const context: Context = { messages: [{ role: "user", content: "hello", timestamp: Date.now() }] };
 	const result = await streamOpenAICompletions(model, context, {
 		apiKey: "test-key",
 		fetch: Object.assign(mockFetch, { preconnect: fetch.preconnect }),
