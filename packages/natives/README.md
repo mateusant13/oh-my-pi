@@ -47,12 +47,43 @@ console.log(pdf.markdown, pdf.pagesNeedingOcr);
 
 ## Building
 
-```bash
-# Build native addon from workspace root (requires Rust)
-bun run build
+From a fresh clone, use the workspace setup command at the repository root:
 
-# Type check
-bun run check
+```bash
+bun setup
+```
+
+This installs workspace dependencies and builds `@oh-my-pi/pi-natives`; re-run
+`bun run build:native` after changing Rust crates or `packages/natives`
+(`README.md` at the repository root describes this setup path).
+
+### Windows GNU toolchain prerequisites
+
+Before running `bun setup` with the `x86_64-pc-windows-gnu` Rust toolchain,
+install these packages in an MSYS2 MinGW x64 shell:
+
+```bash
+pacman -S --needed mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-nodejs
+export PATH="/mingw64/bin:$PATH"
+```
+
+Keep `/mingw64/bin` on `PATH` when running `bun setup`. The local native build
+uses CMake and Ninja for the bundled Opus build (`packages/natives/scripts/build-bindings.ts:24-54`;
+`.cargo/config.toml:17-21` selects Ninja). The GNU-Windows N-API setup searches
+`LIBNODE_PATH`, `LIBPATH`, and `PATH` for `libnode.dll`, then links the `node`
+library (`napi-build 2.4.1`, `windows.rs:4-16,19-41`); the MinGW Node package
+provides both `libnode.dll` and its import library `libnode.dll.a`. The stock
+Windows Node distribution's `node.exe` and `node.lib` do not provide these GNU
+link inputs. MSYS2 `mingw-w64-x86_64-nodejs` 24.8.0-2 was used to build and
+verify this path.
+
+For other host toolchains, install Rust and run `bun setup` from the repository
+root; the native build script can discover CMake/Ninja from Visual Studio on
+Windows when those components are installed (`build-bindings.ts:24-54`).
+
+```bash
+# Type check the package
+bun --cwd=packages/natives run check
 ```
 
 ## Architecture
