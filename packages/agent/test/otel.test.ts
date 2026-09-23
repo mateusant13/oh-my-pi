@@ -565,6 +565,49 @@ describe("agent-loop OTEL instrumentation", () => {
 		expect(ev?.span).toBeDefined();
 	});
 
+	it("reports unreported cache buckets as unknown instead of measured zero", async () => {
+		const mock = createMockModel({
+			...MOCK_IDENT,
+			responses: [
+				{
+					content: ["ok"],
+					stopReason: "stop",
+					usage: {
+						input: 50,
+						output: 25,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 75,
+						unreported: ["cacheRead", "cacheWrite"],
+					},
+				},
+			],
+		});
+		const events: ChatUsageEvent[] = [];
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			telemetry: {
+				onChatUsage: event => {
+					events.push(event);
+				},
+			},
+		};
+		const ctx: AgentContext = { systemPrompt: [], messages: [], tools: [] };
+		await runAndDrain(agentLoop([createUserMessage("hi")], ctx, config, undefined, mock.stream));
+
+		// The flagged bucket is unknown: snapshot fields are undefined, the span
+		// omits the cache attributes entirely (absent, not measured 0), while the
+		// input/output totals keep using the 0 placeholder for arithmetic.
+		const ev = events[0];
+		expect(ev?.usage.cachedInputTokens).toBeUndefined();
+		expect(ev?.usage.cacheWriteTokens).toBeUndefined();
+		const chat = findSpan(exporter.getFinishedSpans(), "chat mock-model");
+		expect(chat?.attributes[GenAIAttr.UsageCacheReadInputTokens]).toBeUndefined();
+		expect(chat?.attributes[GenAIAttr.UsageCacheCreationInputTokens]).toBeUndefined();
+		expect(chat?.attributes[GenAIAttr.UsageInputTokens]).toBe(50);
+	});
+
 	it("forwards cost estimate to onChatUsage when estimator is configured", async () => {
 		const mock = createMockModel({
 			...MOCK_IDENT,

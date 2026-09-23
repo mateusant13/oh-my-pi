@@ -98,6 +98,9 @@ export type Provider = string;
 /** Token budgets for each thinking level (token-based providers only) */
 export type ThinkingBudgets = { [key in Effort]?: number };
 
+/** {@link Usage} count buckets a provider response may omit — see {@link Usage.unreported}. */
+export type UnreportedUsageField = "input" | "output" | "cacheRead" | "cacheWrite";
+
 export interface Usage {
 	/** Non-cached conversation input tokens (matches the bucket the provider bills as new input). */
 	input: number;
@@ -131,6 +134,16 @@ export interface Usage {
 	 * `undefined` means unknown, NOT zero.
 	 */
 	reasoningTokens?: number;
+	/**
+	 * Count buckets the provider never reported on the wire for this turn
+	 * (absent or non-numeric in the response usage). A listed bucket is
+	 * UNKNOWN, not measured zero: its numeric field carries a 0 placeholder so
+	 * existing arithmetic stays total, and {@link totalTokens} therefore only
+	 * reflects buckets that were actually reported. Same convention as
+	 * {@link reasoningTokens} — never invent a measured zero. Absent (or empty)
+	 * means the provider reported every bucket.
+	 */
+	unreported?: readonly UnreportedUsageField[];
 	/**
 	 * Cache-write TTL breakdown (Anthropic only). When set, the components sum to
 	 * `cacheWrite`. Absent providers do not populate this.

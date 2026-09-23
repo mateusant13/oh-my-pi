@@ -1224,8 +1224,12 @@ function applyUsageAttributes(span: Span, usage: Usage | undefined): void {
 	span.setAttribute(GenAIAttr.UsageOutputTokens, outputTokens);
 	const total = usage.totalTokens ?? inputTokens + outputTokens;
 	span.setAttribute(PiGenAIAttr.UsageTotalTokens, total);
-	if (usage.cacheRead != null) span.setAttribute(GenAIAttr.UsageCacheReadInputTokens, usage.cacheRead);
-	if (usage.cacheWrite != null) span.setAttribute(GenAIAttr.UsageCacheCreationInputTokens, usage.cacheWrite);
+	if (usage.cacheRead != null && !usage.unreported?.includes("cacheRead")) {
+		span.setAttribute(GenAIAttr.UsageCacheReadInputTokens, usage.cacheRead);
+	}
+	if (usage.cacheWrite != null && !usage.unreported?.includes("cacheWrite")) {
+		span.setAttribute(GenAIAttr.UsageCacheCreationInputTokens, usage.cacheWrite);
+	}
 	if (usage.reasoningTokens != null) {
 		span.setAttribute(GenAIAttr.UsageReasoningOutputTokens, usage.reasoningTokens);
 	}
@@ -1591,8 +1595,8 @@ function buildUsageSnapshot(usage: Usage): ChatUsageSnapshot {
 		totalTokens:
 			usage.totalTokens ??
 			(usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0) + (usage.output ?? 0),
-		cachedInputTokens: usage.cacheRead,
-		cacheWriteTokens: usage.cacheWrite,
+		cachedInputTokens: usage.unreported?.includes("cacheRead") ? undefined : usage.cacheRead,
+		cacheWriteTokens: usage.unreported?.includes("cacheWrite") ? undefined : usage.cacheWrite,
 		reasoningOutputTokens: usage.reasoningTokens,
 	};
 }

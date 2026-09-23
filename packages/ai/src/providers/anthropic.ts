@@ -1716,6 +1716,43 @@ export function applyAnthropicUsageExtras(usage: Usage, source: AnthropicUsageLi
 	}
 }
 
+const USAGE_COUNT_FIELDS = ["input", "output", "cacheRead", "cacheWrite"] as const;
+
+/**
+ * Apply Anthropic wire usage counts to the harness {@link Usage} shape.
+ *
+ * A present numeric field is assigned and clears its `unreported` flag; an
+ * absent/null field keeps whatever was known before and leaves flags alone.
+ * Pass `first` on a turn's very first usage payload so buckets no payload has
+ * ever reported stay flagged instead of collapsing into a measured zero —
+ * `usage.unreported` ends up naming exactly the buckets that were never
+ * reported, which is what keeps `totalTokens` honest about the buckets its
+ * sum actually observed. A fully reported turn leaves the flag unset.
+ */
+function applyAnthropicUsageCounts(usage: Usage, wire: AnthropicWireUsage, first = false): void {
+	if (first) usage.unreported = [...USAGE_COUNT_FIELDS];
+	const clearReported = (field: (typeof USAGE_COUNT_FIELDS)[number]): void => {
+		const remaining = usage.unreported?.filter(entry => entry !== field);
+		usage.unreported = remaining?.length ? remaining : undefined;
+	};
+	if (typeof wire.input_tokens === "number") {
+		usage.input = wire.input_tokens;
+		clearReported("input");
+	}
+	if (typeof wire.output_tokens === "number") {
+		usage.output = wire.output_tokens;
+		clearReported("output");
+	}
+	if (typeof wire.cache_read_input_tokens === "number") {
+		usage.cacheRead = wire.cache_read_input_tokens;
+		clearReported("cacheRead");
+	}
+	if (typeof wire.cache_creation_input_tokens === "number") {
+		usage.cacheWrite = wire.cache_creation_input_tokens;
+		clearReported("cacheWrite");
+	}
+}
+
 function parseAnthropicWireUsage(value: unknown): AnthropicWireUsage | undefined {
 	if (!isRecord(value)) return undefined;
 	const cacheCreation = isRecord(value.cache_creation)
@@ -2267,10 +2304,7 @@ const streamAnthropicOnce = (
 					body.input_transformations,
 					seenInputTransformations,
 				);
-				output.usage.input = wireUsage.input_tokens ?? 0;
-				output.usage.output = wireUsage.output_tokens ?? 0;
-				output.usage.cacheRead = wireUsage.cache_read_input_tokens ?? 0;
-				output.usage.cacheWrite = wireUsage.cache_creation_input_tokens ?? 0;
+				applyAnthropicUsageCounts(output.usage, wireUsage, true);
 				applyAnthropicUsageExtras(output.usage, wireUsage);
 				output.usage.totalTokens =
 					output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
@@ -2519,10 +2553,7 @@ const streamAnthropicOnce = (
 							const startUsage = startMessage?.usage;
 							if (startUsage) {
 								applyAnthropicUsageExtras(output.usage, startUsage);
-								output.usage.input = startUsage.input_tokens || 0;
-								output.usage.output = startUsage.output_tokens || 0;
-								output.usage.cacheRead = startUsage.cache_read_input_tokens || 0;
-								output.usage.cacheWrite = startUsage.cache_creation_input_tokens || 0;
+								applyAnthropicUsageCounts(output.usage, startUsage, true);
 								output.usage.totalTokens =
 									output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 								if (serverSideFallback) {
@@ -2536,6 +2567,7 @@ const streamAnthropicOnce = (
 								}
 							} else {
 								reportAnthropicEnvelopeAnomaly("message_start missing usage");
+								output.usage.unreported = [...USAGE_COUNT_FIELDS];
 							}
 							continue;
 						}
@@ -2842,18 +2874,7 @@ const streamAnthropicOnce = (
 							}
 							const deltaUsage = event.usage;
 							if (deltaUsage) {
-								if (deltaUsage.input_tokens != null) {
-									output.usage.input = deltaUsage.input_tokens;
-								}
-								if (deltaUsage.output_tokens != null) {
-									output.usage.output = deltaUsage.output_tokens;
-								}
-								if (deltaUsage.cache_read_input_tokens != null) {
-									output.usage.cacheRead = deltaUsage.cache_read_input_tokens;
-								}
-								if (deltaUsage.cache_creation_input_tokens != null) {
-									output.usage.cacheWrite = deltaUsage.cache_creation_input_tokens;
-								}
+								applyAnthropicUsageCounts(output.usage, deltaUsage);
 								applyAnthropicUsageExtras(output.usage, deltaUsage);
 								output.usage.totalTokens =
 									output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
