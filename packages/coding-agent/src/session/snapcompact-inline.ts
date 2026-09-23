@@ -422,13 +422,26 @@ interface FrameCacheEntry {
 
 /**
  * Stateless with respect to the model (passed per call, so mid-session model
- * switches re-resolve shape and budget); stateful only for the render caches,
- * which live as long as the session's Agent.
+ * switches re-resolve shape and budget); stateful only for the render caches
+ * and the sent-render freeze map, which live as long as the session's Agent.
  */
 export class SnapcompactInlineTransformer {
 	/** Rendered tool-result frames keyed by toolCallId. */
 	#toolCache = new Map<string, FrameCacheEntry>();
 	#systemCache?: FrameCacheEntry;
+	/**
+	 * INVARIANT — the provider-visible prefix is append-only: an item already
+	 * sent is never re-serialized differently. A tool result's rendering
+	 * decision is made on the request where it first ships and frozen here —
+	 * `true` shipped as note + frames, `false` shipped as its original text —
+	 * so appending a newer result can never re-render an item the provider
+	 * already received. Every path that lets tool results reach the provider
+	 * records the decision before returning (the text-only and exhausted-budget
+	 * paths record `false` via `#freezeUnseenAsSentText`). Entries are evicted
+	 * with the id, like `#toolCache`, when the item leaves the context
+	 * (compaction rewrites the prefix regardless).
+	 */
+	#sentRender = new Map<string, boolean>();
 
 	constructor(
 		private readonly options: SnapcompactInlineOptions,
@@ -438,13 +451,21 @@ export class SnapcompactInlineTransformer {
 
 	async transform(context: Context, model: Model): Promise<Context> {
 		// Vision gate: providers silently DROP images on text-only models —
-		// rendering would lose the content entirely.
-		if (!model.input.includes("image")) return context;
+		// rendering would lose the content entirely. Tool results still ship
+		// (as text), so record the decision — see #sentRender.
+		if (!model.input.includes("image")) {
+			this.#freezeUnseenAsSentText(context);
+			return context;
+		}
 
 		const shape = snapcompact.resolveShape(model, this.options.shape);
 		const tokenizer = new Tokenizer(model);
 		const budget = snapcompact.providerImageBudget(model.provider) - countMessageImages(context.messages);
-		if (budget <= 0) return context;
+		// No budget → tool results ship as text; record before returning (#sentRender).
+		if (budget <= 0) {
+			this.#freezeUnseenAsSentText(context);
+			return context;
+		}
 
 		const messages = [...context.messages];
 
@@ -492,9 +513,29 @@ export class SnapcompactInlineTransformer {
 			hasUserMessage: userIndex >= 0,
 		});
 
+		// Freeze at first send (see #sentRender): a tool result already in the
+		// sent prefix keeps the representation it shipped with; only items
+		// appearing for the first time take today's plan verdict.
+		const planned = new Set(plan.toolResults.map(swap => swap.id));
+		const swaps: InlineSwapPlan["toolResults"] = [];
+		for (const candidate of candidates) {
+			const sent = this.#sentRender.get(candidate.id);
+			if (sent === false) continue;
+			if (sent === undefined) {
+				const imaged = planned.has(candidate.id);
+				this.#sentRender.set(candidate.id, imaged);
+				if (!imaged) continue;
+			} else if (candidate.frames === 0) {
+				// Already shipped as frames but frames collapsed to 0 (floor/shape
+				// edge): a note-only swap would drop the text — ship the original.
+				continue;
+			}
+			swaps.push({ id: candidate.id, textTokens: candidate.textTokens, frames: candidate.frames });
+		}
+
 		let changed = false;
 		const savings: Array<{ toolCallId: string; savedTokens: number }> = [];
-		for (const swap of plan.toolResults) {
+		for (const swap of swaps) {
 			const target = targets.get(swap.id);
 			if (!target) continue;
 			const frames = await this.#framesFor(this.#toolCache, swap.id, target.text, shape);
@@ -522,6 +563,9 @@ export class SnapcompactInlineTransformer {
 			// (compacted away) so the cache stays bounded by live history.
 			for (const key of this.#toolCache.keys()) {
 				if (!liveToolCallIds.has(key)) this.#toolCache.delete(key);
+			}
+			for (const key of this.#sentRender.keys()) {
+				if (!liveToolCallIds.has(key)) this.#sentRender.delete(key);
 			}
 		}
 
@@ -555,6 +599,20 @@ export class SnapcompactInlineTransformer {
 
 		if (!changed) return context;
 		return { ...context, systemPrompt, messages };
+	}
+
+	/**
+	 * Record every not-yet-decided tool result as shipped-text on transform
+	 * paths that let it reach the provider without imaging (text-only model,
+	 * exhausted image budget), so a later request cannot flip an item whose
+	 * text form already went out. See #sentRender for the invariant.
+	 */
+	#freezeUnseenAsSentText(context: Context): void {
+		if (!this.options.renderToolResults) return;
+		for (const message of context.messages) {
+			if (message.role !== "toolResult" || this.#sentRender.has(message.toolCallId)) continue;
+			this.#sentRender.set(message.toolCallId, false);
+		}
 	}
 
 	async #framesFor(
