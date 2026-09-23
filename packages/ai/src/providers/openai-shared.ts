@@ -771,6 +771,7 @@ export function applyOpenAIExtraBody<P extends object>(
  * `venice_parameters`, nested `reasoning`, gateway `provider`/`providerOptions`,
  * sampling extras). Lives in the shared module beside the request-shaping
  * helpers that mutate it.
+ */
 	export type OpenAICompletionsParams = Omit<ChatCompletionCreateParamsStreaming, "reasoning_effort" | "service_tier"> & {
 		top_k?: number;
 		min_p?: number;
