@@ -1847,10 +1847,15 @@ export class TurnRecovery {
 			this.#activeRetryFallback.lastAppliedFallbackThinkingLevel = nextThinkingLevel;
 			this.#activeRetryFallback.pinned = this.#activeRetryFallback.pinned || options?.pinFallback === true;
 		}
+		// Announce the RESOLVED candidate — the model actually swapped in above —
+		// not the configured chain string: a chain id unknown to the registry
+		// fuzzy-resolves to a different model (observed 2026-09-22: chain
+		// `openai-codex/gpt-6-luna:high` executed as `openai-codex/gpt-5.6-luna`),
+		// and the log must describe the walk that happened.
 		await this.#host.emitSessionEvent({
 			type: "retry_fallback_applied",
 			from: currentSelector,
-			to: selector.raw,
+			to: formatRetryFallbackSelector(candidate, this.#host.thinkingLevel()),
 			role,
 		});
 		return true;

@@ -1703,7 +1703,7 @@ describe("AgentSession retry fallback", () => {
 			{
 				type: "retry_fallback_applied",
 				from: advisorRoleSelector,
-				to: advisorFallbackSelector,
+				to: `${advisorFallbackSelector}:high`,
 				role: "advisor",
 			},
 		]);
@@ -1975,7 +1975,7 @@ describe("AgentSession retry fallback", () => {
 			{
 				type: "retry_fallback_applied",
 				from: advisorRoleSelector,
-				to: advisorFallbackSelector,
+				to: `${advisorFallbackSelector}:high`,
 				role: "advisor",
 			},
 			{

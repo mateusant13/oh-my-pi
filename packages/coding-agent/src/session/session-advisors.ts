@@ -1527,10 +1527,13 @@ export class SessionAdvisors {
 				}
 				advisor.retryFallbackPendingSuccess = true;
 				this.#host.settings.getStorage()?.recordModelUsage(formatModelStringWithRouting(candidate));
+				// Announce the RESOLVED candidate — the model actually swapped in above —
+				// not the configured chain string (same divergence as TurnRecovery,
+				// 2026-09-22: unknown chain ids fuzzy-resolve to a different model).
 				await this.#host.emitSessionEvent({
 					type: "retry_fallback_applied",
 					from: currentSelector,
-					to: selector.raw,
+					to: formatRetryFallbackSelector(candidate, nextThinkingLevel),
 					role,
 				});
 				return true;
