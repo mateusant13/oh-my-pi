@@ -266,6 +266,9 @@ describe("shared OpenAI usage accounting", () => {
 			cacheWriteOpenRouter: 5_000,
 			cacheWriteDeepSeek: 50,
 			hasDeepSeekCacheHitAndMiss: true,
+			hasCoreUsage: true,
+			hasCacheRead: true,
+			hasCacheWrite: true,
 		});
 
 		expect(usage.input).toBe(800);
@@ -283,6 +286,9 @@ describe("shared OpenAI usage accounting", () => {
 			cacheWriteOpenRouter: undefined,
 			cacheWriteDeepSeek: 50,
 			hasDeepSeekCacheHitAndMiss: true,
+			hasCoreUsage: true,
+			hasCacheRead: true,
+			hasCacheWrite: true,
 		});
 
 		expect(usage.input).toBe(50);
@@ -300,6 +306,9 @@ describe("shared OpenAI usage accounting", () => {
 			cacheWriteOpenRouter: 0,
 			cacheWriteDeepSeek: 50,
 			hasDeepSeekCacheHitAndMiss: true,
+			hasCoreUsage: true,
+			hasCacheRead: true,
+			hasCacheWrite: true,
 		});
 
 		expect(usage.input).toBe(50);

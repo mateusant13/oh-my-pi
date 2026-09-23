@@ -1355,6 +1355,11 @@ function verifyProviderReportedPrefix(
 		span.setAttribute(PiGenAIAttr.SentPayloadFingerprint, fingerprintSentItems(state.items));
 	}
 	if (usage?.cacheRead == null) return;
+	// An unreported bucket is unknown, not a measured zero: stamping the 0
+	// placeholder as ReportedPrefixTokens (or comparing it against the
+	// prediction) fabricates a reading the provider never sent. Skip the stamp,
+	// the compare, and the re-arm for this turn — keep the last truthful state.
+	if (usage.unreported?.includes("cacheRead")) return;
 	span.setAttribute(PiGenAIAttr.ReportedPrefixTokens, usage.cacheRead);
 	const predicted =
 		state.predictedPrefixTokens !== undefined && state.predictedModel === model
@@ -1372,8 +1377,14 @@ function verifyProviderReportedPrefix(
 			);
 		}
 	}
-	state.predictedPrefixTokens = usage.cacheRead + (usage.cacheWrite ?? 0);
-	state.predictedModel = model;
+	// Never re-arm the prediction from an unreported write bucket: the 0
+	// placeholder would drag the prediction down and warn falsely on the next
+	// truthful turn. The detector stays biased toward silence (false negatives
+	// only) rather than fabricated WARNs.
+	if (!usage.unreported?.includes("cacheWrite")) {
+		state.predictedPrefixTokens = usage.cacheRead + (usage.cacheWrite ?? 0);
+		state.predictedModel = model;
+	}
 }
 
 /**

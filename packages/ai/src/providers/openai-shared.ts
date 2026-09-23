@@ -425,6 +425,12 @@ export interface OpenAIUsageAccountingInput {
 	cacheWriteOpenRouter: number | undefined;
 	cacheWriteDeepSeek: number | undefined;
 	hasDeepSeekCacheHitAndMiss: boolean;
+	/** Both core wire counts arrived as numbers (omitted core must not bless a cache omission). */
+	hasCoreUsage: boolean;
+	/** Any cache-read wire field arrived as a number (explicit 0 counts as present/measured). */
+	hasCacheRead: boolean;
+	/** Any cache-write wire field arrived as a number (explicit 0 counts as present/measured). */
+	hasCacheWrite: boolean;
 }
 
 export interface OpenAIUsageAccounting {
@@ -435,6 +441,8 @@ export interface OpenAIUsageAccounting {
 	totalTokens: number;
 	reasoningTokens?: number;
 	orchestration?: Usage["orchestration"];
+	/** Cache buckets omitted while core usage was absent: unknown, not measured zero. */
+	unreported?: Usage["unreported"];
 }
 
 export function calculateOpenAIUsageAccounting(accounting: OpenAIUsageAccountingInput): OpenAIUsageAccounting {
@@ -447,6 +455,14 @@ export function calculateOpenAIUsageAccounting(accounting: OpenAIUsageAccounting
 		? Math.max(0, accounting.promptTokens - accounting.cachedTokens)
 		: Math.max(0, accounting.promptTokens - accounting.cachedTokens - cacheWriteTokens);
 	const cacheWrite = isDeepSeekUsage ? 0 : cacheWriteTokens;
+	// An omitted cache field is a measured zero only when core usage arrived; with
+	// core absent the omission is genuine unknown. Presence (explicit wire 0) is
+	// decided by the caller via typeof checks — never by the value computation.
+	const unreported: Array<"cacheRead" | "cacheWrite"> = [];
+	if (!accounting.hasCoreUsage) {
+		if (!accounting.hasCacheRead) unreported.push("cacheRead");
+		if (!accounting.hasCacheWrite) unreported.push("cacheWrite");
+	}
 	return {
 		input,
 		output: accounting.outputTokens,
@@ -454,6 +470,7 @@ export function calculateOpenAIUsageAccounting(accounting: OpenAIUsageAccounting
 		cacheWrite,
 		totalTokens: input + accounting.outputTokens + accounting.cachedTokens + cacheWrite,
 		...(accounting.reasoningTokens > 0 ? { reasoningTokens: accounting.reasoningTokens } : {}),
+		...(unreported.length > 0 ? { unreported } : {}),
 	};
 }
 
@@ -754,16 +771,15 @@ export function applyOpenAIExtraBody<P extends object>(
  * `venice_parameters`, nested `reasoning`, gateway `provider`/`providerOptions`,
  * sampling extras). Lives in the shared module beside the request-shaping
  * helpers that mutate it.
- */
-export type OpenAICompletionsParams = Omit<ChatCompletionCreateParamsStreaming, "reasoning_effort" | "service_tier"> & {
-	top_k?: number;
-	min_p?: number;
-	repetition_penalty?: number;
-	thinking?: { type: "enabled" | "disabled"; effort?: string; keep?: "all" };
-	enable_thinking?: boolean;
-	preserve_thinking?: boolean;
-	chat_template_kwargs?: {
+	export type OpenAICompletionsParams = Omit<ChatCompletionCreateParamsStreaming, "reasoning_effort" | "service_tier"> & {
+		top_k?: number;
+		min_p?: number;
+		repetition_penalty?: number;
+		thinking?: { type: "enabled" | "disabled"; effort?: string; keep?: "all" };
 		enable_thinking?: boolean;
+		preserve_thinking?: boolean;
+		chat_template_kwargs?: {
+			enable_thinking?: boolean;
 		thinking?: boolean;
 		preserve_thinking?: boolean;
 		reasoning_effort?: string;
@@ -3772,6 +3788,10 @@ export function populateResponsesUsageFromResponse(
 		cacheWriteDeepSeek: usage.prompt_cache_miss_tokens ?? undefined,
 		hasDeepSeekCacheHitAndMiss:
 			usage.prompt_cache_hit_tokens !== undefined && usage.prompt_cache_miss_tokens !== undefined,
+		hasCoreUsage: typeof usage.input_tokens === "number" && typeof usage.output_tokens === "number",
+		hasCacheRead: typeof details?.cached_tokens === "number" || typeof usage.prompt_cache_hit_tokens === "number",
+		hasCacheWrite:
+			typeof details?.cache_write_tokens === "number" || typeof usage.prompt_cache_miss_tokens === "number",
 	});
 	const orchestrationTotal = orchestrationInput + orchestrationInputCached + orchestrationOutputTokens;
 	if (orchestrationTotal > 0) {

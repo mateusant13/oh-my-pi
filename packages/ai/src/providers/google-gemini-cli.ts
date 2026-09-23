@@ -879,6 +879,12 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 						const promptTokens = responseData.usageMetadata.promptTokenCount || 0;
 						const cacheReadTokens = responseData.usageMetadata.cachedContentTokenCount || 0;
 						const thinkingTokens = responseData.usageMetadata.thoughtsTokenCount || 0;
+						// Same omission rule as the shared Google path: an absent cache
+						// count is unknown (not measured zero) when core usage is absent.
+						const hasCoreUsage =
+							typeof responseData.usageMetadata.promptTokenCount === "number" &&
+							typeof responseData.usageMetadata.candidatesTokenCount === "number";
+						const hasCacheRead = typeof responseData.usageMetadata.cachedContentTokenCount === "number";
 						output.usage = {
 							input: promptTokens - cacheReadTokens,
 							output: (responseData.usageMetadata.candidatesTokenCount || 0) + thinkingTokens,
@@ -886,6 +892,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 							cacheWrite: 0,
 							totalTokens: responseData.usageMetadata.totalTokenCount || 0,
 							...(thinkingTokens > 0 ? { reasoningTokens: thinkingTokens } : {}),
+							...(!hasCoreUsage && !hasCacheRead ? { unreported: ["cacheRead"] as const } : {}),
 							cost: {
 								input: 0,
 								output: 0,

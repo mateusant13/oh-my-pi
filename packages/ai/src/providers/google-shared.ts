@@ -740,6 +740,14 @@ export async function consumeGoogleStream<T extends GoogleApiType>(args: {
 			// Ref: https://ai.google.dev/api/generate-content#v1beta.GenerateContentResponse.UsageMetadata
 			const cachedTokens = chunk.usageMetadata.cachedContentTokenCount || 0;
 			const thinkingTokens = chunk.usageMetadata.thoughtsTokenCount || 0;
+			// Same omission rule as the OpenAI family: an absent cache count is a
+			// measured zero only when core usage arrived; with core absent it is
+			// genuine unknown. (Google has no cache-write wire field at all, so
+			// cacheWrite stays a structural 0 and only cacheRead can be unknown.)
+			const hasCoreUsage =
+				typeof chunk.usageMetadata.promptTokenCount === "number" &&
+				typeof chunk.usageMetadata.candidatesTokenCount === "number";
+			const hasCacheRead = typeof chunk.usageMetadata.cachedContentTokenCount === "number";
 			output.usage = {
 				input: (chunk.usageMetadata.promptTokenCount || 0) - cachedTokens,
 				output: (chunk.usageMetadata.candidatesTokenCount || 0) + thinkingTokens,
@@ -747,6 +755,7 @@ export async function consumeGoogleStream<T extends GoogleApiType>(args: {
 				cacheWrite: 0,
 				totalTokens: chunk.usageMetadata.totalTokenCount || 0,
 				...(thinkingTokens > 0 ? { reasoningTokens: thinkingTokens } : {}),
+				...(!hasCoreUsage && !hasCacheRead ? { unreported: ["cacheRead"] as const } : {}),
 				cost: {
 					input: 0,
 					output: 0,

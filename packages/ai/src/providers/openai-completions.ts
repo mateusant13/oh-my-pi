@@ -1889,6 +1889,13 @@ export function parseChunkUsage(
 		cacheWriteOpenRouter: typeof cacheWriteTokens === "number" ? cacheWriteTokens : undefined,
 		cacheWriteDeepSeek: typeof promptCacheMissTokens === "number" ? promptCacheMissTokens : undefined,
 		hasDeepSeekCacheHitAndMiss: typeof promptCacheHitTokens === "number" && typeof promptCacheMissTokens === "number",
+		hasCoreUsage: typeof promptTokens === "number" && typeof completionTokens === "number",
+		hasCacheRead:
+			typeof cachedTokens === "number" ||
+			typeof promptCacheHitTokens === "number" ||
+			typeof promptTokenCachedTokens === "number" ||
+			typeof cachedContentTokenCount === "number",
+		hasCacheWrite: typeof cacheWriteTokens === "number" || typeof promptCacheMissTokens === "number",
 	});
 	const usage: AssistantMessage["usage"] = {
 		...accounting,
