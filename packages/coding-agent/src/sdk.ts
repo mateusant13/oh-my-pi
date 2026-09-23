@@ -8,6 +8,7 @@ import {
 	type AgentTool,
 	AppendOnlyContextManager,
 	filterProviderReplayMessages,
+	recordSentPayload,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type {
@@ -3464,7 +3465,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			);
 		};
 		const onPayload = async (payload: unknown, model?: Model) => {
-			return await extensionRunner.emitBeforeProviderRequest(payload, model);
+			const sent = await extensionRunner.emitBeforeProviderRequest(payload, model);
+			// P3: fingerprint the payload ACTUALLY SENT (post-hook), so telemetry can
+			// compare the provider-reported prefix against what left this process —
+			// never the stored/original Context, which cannot show a hook rewrite.
+			recordSentPayload(options.telemetry, sent);
+			return sent;
 		};
 		const onResponse: SimpleStreamOptions["onResponse"] = async (response, model) => {
 			await extensionRunner.emitAfterProviderResponse(response, model);

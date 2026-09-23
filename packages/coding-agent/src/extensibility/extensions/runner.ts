@@ -9,6 +9,7 @@ import type {
 	AgentToolResult,
 	AgentToolUpdateCallback,
 } from "@oh-my-pi/pi-agent-core";
+import { firstChangedPayloadItemIndex, providerPayloadItems } from "@oh-my-pi/pi-agent-core";
 import type { CredentialDisabledEvent, ImageContent, Model, ProviderResponseMetadata } from "@oh-my-pi/pi-ai";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -479,6 +480,16 @@ export class ExtensionRunner {
 	 * pressure. Drained in {@link initialize} once the runtime/UI context is wired.
 	 */
 	#pendingMcpNotifications: Array<Omit<McpNotificationEvent, "type">> = [];
+
+	/**
+	 * Items of the last provider payload returned from this runner — the payload the
+	 * provider actually saw. Invariant at this seam: the provider-visible prefix, once
+	 * sent, is append-only — no in-place rewrite, no reordering, no volatile value in
+	 * the cached region. Each request compares against this baseline (consecutive
+	 * requests from this session; an interleaved side-channel request resets it, which
+	 * still reports where its prefix diverges rather than hiding the change).
+	 */
+	#lastSentPayloadItems: readonly string[] | undefined;
 
 	/**
 	 * Timers scheduled by extensions through the sanctioned `ctx.setInterval` /
@@ -1686,6 +1697,27 @@ export class ExtensionRunner {
 					currentPayload = handlerResult;
 				}
 			}
+		}
+
+		// Append-only guard at the seam where hooks can rewrite the wire body:
+		// compare the payload that will be sent against the payload sent on the
+		// previous request. When a previously-sent item's bytes changed — an
+		// in-place rewrite, a reorder, or a volatile value injected into the
+		// cached region — warn loudly naming the first changed slot instead of
+		// letting the provider prefix bust silently. A payload without a message
+		// list leaves the baseline untouched (nothing comparable to guard).
+		const items = providerPayloadItems(currentPayload);
+		if (items !== undefined) {
+			const previous = this.#lastSentPayloadItems;
+			if (previous !== undefined) {
+				const divergedAt = firstChangedPayloadItemIndex(previous, items);
+				if (divergedAt !== undefined) {
+					logger.warn(
+						`before_provider_request payload is not append-only — an already-sent provider payload item changed; the provider-visible prefix must never be rewritten in place. first_changed_item_index=${divergedAt} previous_items=${previous.length} current_items=${items.length}`,
+					);
+				}
+			}
+			this.#lastSentPayloadItems = items;
 		}
 
 		return currentPayload;

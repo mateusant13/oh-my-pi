@@ -39,6 +39,7 @@ import {
 	type ToolChoice,
 	type Usage,
 } from "@oh-my-pi/pi-ai";
+import { logger } from "@oh-my-pi/pi-utils";
 import {
 	type Attributes,
 	type AttributeValue,
@@ -161,6 +162,12 @@ export const enum PiGenAIAttr {
 	GatewayRoutedTo = "pi.gen_ai.gateway.routed_to",
 	/** Cloudflare AI Gateway response-cache status (`cf-aig-cache-status`), never prompt-cache. */
 	GatewayResponseCacheStatus = "pi.gen_ai.gateway.response_cache.status",
+	/** FNV-1a fingerprint of the payload ACTUALLY sent (post before_provider_request) — never the stored Context. */
+	SentPayloadFingerprint = "pi.gen_ai.cache.sent_payload_fingerprint",
+	/** Provider-reported cached-prefix tokens we predicted would match, derived from the previous sent payload + usage. */
+	PredictedPrefixTokens = "pi.gen_ai.cache.predicted_prefix_tokens",
+	/** Provider-reported cached-prefix tokens on this response. */
+	ReportedPrefixTokens = "pi.gen_ai.cache.reported_prefix_tokens",
 }
 
 /** GenAI operation names — values for {@link GenAIAttr.OperationName}. */
@@ -1127,6 +1134,7 @@ export async function finishChatSpan(
 	if (!span) return;
 	applyChatResponseAttributes(span, message);
 	applyUsageAttributes(span, message.usage);
+	if (telemetry) verifyProviderReportedPrefix(telemetry, span, message.usage, message.model);
 	applyGatewayAttributes(span, options.responseHeaders, options.baseUrl);
 	const cost = applyCostEstimate(telemetry, span, message, options.serviceTier, options.stepNumber);
 	if (telemetry) {
@@ -1225,6 +1233,143 @@ function applyUsageAttributes(span: Span, usage: Usage | undefined): void {
 		const sums = (usage.server.webSearch ?? 0) + (usage.server.webFetch ?? 0);
 		if (sums > 0) span.setAttribute(PiGenAIAttr.UsageServerSideTools, sums);
 	}
+}
+
+/** Wire params carry these message-list keys (`messages` for anthropic/openai, `input` for
+ *  responses, `contents` for gemini). The first array-valued one is the prefix's item list. */
+const PAYLOAD_MESSAGE_LIST_KEYS = ["messages", "input", "contents"] as const;
+
+/**
+ * Canonical per-item strings of a provider payload's message list — the identity model
+ * of the provider-visible prefix.
+ *
+ * `cache_control` is stripped: it is a cache BREAKPOINT directive, not cached content.
+ * The production builder moves it to the newest message every turn (the sanctioned
+ * Anthropic edge-breakpoint pattern), markers add no tokens, and the provider matches
+ * the token prefix — comparing the directive would report that pattern as a rewrite.
+ *
+ * The input MUST be the payload actually sent (the value returned by the
+ * before_provider_request chain), never the stored/original Context: a hook that
+ * rewrites the wire body is invisible in the stored list, which is exactly how the
+ * instrument used to lie.
+ */
+export function providerPayloadItems(payload: unknown): readonly string[] | undefined {
+	if (!payload || typeof payload !== "object") return undefined;
+	for (const key of PAYLOAD_MESSAGE_LIST_KEYS) {
+		const value = (payload as Record<string, unknown>)[key];
+		if (Array.isArray(value)) {
+			return value.map(item =>
+				JSON.stringify(item, (entryKey, entryValue) => (entryKey === "cache_control" ? undefined : entryValue)),
+			);
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Index of the first previously-sent item whose bytes changed in the current payload.
+ *
+ * Returns `undefined` for a pure append (every previously-sent item byte-identical and
+ * still present). A truncated payload reports `current.length` — the first
+ * previously-sent item that no longer exists. The index is 0-based over the message
+ * list, so `first_changed_item_index` in a WARN always names a real slot (or the
+ * explicit `-1` sentinel when no item diverged).
+ */
+export function firstChangedPayloadItemIndex(
+	previous: readonly string[],
+	current: readonly string[],
+): number | undefined {
+	const shared = Math.min(previous.length, current.length);
+	for (let index = 0; index < shared; index++) {
+		if (previous[index] !== current[index]) return index;
+	}
+	if (current.length < previous.length) return current.length;
+	return undefined;
+}
+
+/** FNV-1a32 over the canonical item strings — stable, dependency-free sent-payload fingerprint. */
+function fingerprintSentItems(items: readonly string[]): string {
+	let hash = 0x811c9dc5;
+	const serialized = items.join(" ");
+	for (let index = 0; index < serialized.length; index++) {
+		hash ^= serialized.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash.toString(16).padStart(8, "0");
+}
+
+/** Sent-prefix telemetry state, keyed by the session's AgentTelemetryConfig object identity. */
+interface SentPayloadPrefixState {
+	previousItems: readonly string[] | undefined;
+	items: readonly string[] | undefined;
+	predictedPrefixTokens: number | undefined;
+	predictedModel: string | undefined;
+}
+
+const sentPayloadPrefixState = new WeakMap<AgentTelemetryConfig, SentPayloadPrefixState>();
+
+/**
+ * Record the fingerprint of the payload actually sent for one provider request — the
+ * value returned by the before_provider_request chain, i.e. the body handed to the
+ * transport. Called from the sdk onPayload seam; no-op when telemetry is disabled.
+ */
+export function recordSentPayload(config: AgentTelemetryConfig | undefined, payload: unknown): void {
+	if (!config) return;
+	const items = providerPayloadItems(payload);
+	const state = sentPayloadPrefixState.get(config);
+	if (state) {
+		state.previousItems = state.items;
+		state.items = items;
+		return;
+	}
+	sentPayloadPrefixState.set(config, {
+		previousItems: undefined,
+		items,
+		predictedPrefixTokens: undefined,
+		predictedModel: undefined,
+	});
+}
+
+/**
+ * P3 truthfulness check: stamp the fingerprint of the payload actually sent plus the
+ * predicted/reported prefix tokens on the chat span, and when the provider reports a
+ * SHORTER cache prefix than predicted, emit a loud WARN naming
+ * `first_changed_item_index` — the first previously-sent item whose bytes diverged,
+ * or `-1` when no message-list item changed (divergence outside the list or
+ * provider-side). Silence here was the defect: usage counters alone cannot prove the
+ * sent prefix held.
+ */
+function verifyProviderReportedPrefix(
+	telemetry: AgentTelemetry,
+	span: Span,
+	usage: Usage | undefined,
+	model: string,
+): void {
+	const state = sentPayloadPrefixState.get(telemetry.config);
+	if (!state) return;
+	if (state.items) {
+		span.setAttribute(PiGenAIAttr.SentPayloadFingerprint, fingerprintSentItems(state.items));
+	}
+	if (usage?.cacheRead == null) return;
+	span.setAttribute(PiGenAIAttr.ReportedPrefixTokens, usage.cacheRead);
+	const predicted =
+		state.predictedPrefixTokens !== undefined && state.predictedModel === model
+			? state.predictedPrefixTokens
+			: undefined;
+	if (predicted !== undefined) {
+		span.setAttribute(PiGenAIAttr.PredictedPrefixTokens, predicted);
+		if (usage.cacheRead < predicted) {
+			const divergedAt =
+				state.previousItems && state.items
+					? (firstChangedPayloadItemIndex(state.previousItems, state.items) ?? -1)
+					: -1;
+			logger.warn(
+				`provider-reported cache prefix shorter than predicted — the append-only prefix broke or the provider cache diverged; first_changed_item_index=${divergedAt} predicted_prefix_tokens=${predicted} reported_prefix_tokens=${usage.cacheRead}`,
+			);
+		}
+	}
+	state.predictedPrefixTokens = usage.cacheRead + (usage.cacheWrite ?? 0);
+	state.predictedModel = model;
 }
 
 /**
