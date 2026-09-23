@@ -422,8 +422,9 @@ interface FrameCacheEntry {
 
 /**
  * Stateless with respect to the model (passed per call, so mid-session model
- * switches re-resolve shape and budget); stateful only for the render caches
- * and the sent-render freeze map, which live as long as the session's Agent.
+ * switches re-resolve shape and budget); stateful only for the render caches,
+ * the sent-render freeze map, and the sent system-prompt swap, which live as
+ * long as the session's Agent.
  */
 export class SnapcompactInlineTransformer {
 	/** Rendered tool-result frames keyed by toolCallId. */
@@ -442,6 +443,17 @@ export class SnapcompactInlineTransformer {
 	 * (compaction rewrites the prefix regardless).
 	 */
 	#sentRender = new Map<string, boolean>();
+	/**
+	 * The system-prompt swap decision from the request where the prompt first
+	 * shipped — `false` shipped as original text, a target shipped as note +
+	 * frames on the first user message with the stubbed prompt — so a later
+	 * leftover-budget flip can never re-serialize the already-sent first user
+	 * message. Same append-only discipline as #sentRender, for the other
+	 * per-request re-derived decision. No id eviction: the freeze keys on the
+	 * prompt text itself (see the replay below), so a prompt rebuilt
+	 * mid-session re-decides instead of replaying stale frames.
+	 */
+	#sentSystemPrompt?: SystemPromptImageTarget | false;
 
 	constructor(
 		private readonly options: SnapcompactInlineOptions,
@@ -503,15 +515,23 @@ export class SnapcompactInlineTransformer {
 			}
 		}
 
-		const userIndex = messages.findIndex(message => message.role === "user");
-		const plan = planInlineSwaps({
-			options: this.options,
-			shape,
-			budget,
-			toolResults: candidates,
-			systemPrompt: systemPromptCandidate,
-			hasUserMessage: userIndex >= 0,
-		});
+	// Frozen system-prompt spend reserves budget before planning: the replay
+	// below re-attaches those frames regardless of today's verdict, so new
+	// first-send swaps must fit around them — otherwise the request total
+	// exceeds the provider cap and the downstream clamp drops the oldest
+	// images first (exactly the frozen ones).
+	const committedSystemFrames = this.#sentSystemPrompt
+		? snapcompact.frames(this.#sentSystemPrompt.text, { shape })
+		: 0;
+	const userIndex = messages.findIndex(message => message.role === "user");
+	const plan = planInlineSwaps({
+		options: this.options,
+		shape,
+		budget: budget - committedSystemFrames,
+		toolResults: candidates,
+		systemPrompt: systemPromptCandidate,
+		hasUserMessage: userIndex >= 0,
+	});
 
 		// Freeze at first send (see #sentRender): a tool result already in the
 		// sent prefix keeps the representation it shipped with; only items
@@ -570,15 +590,35 @@ export class SnapcompactInlineTransformer {
 		}
 
 		let systemPrompt = context.systemPrompt;
-		if (plan.systemPrompt && userIndex >= 0 && systemPromptTarget) {
-			const hash = Bun.hash(systemPromptTarget.text);
+		// Freeze at first send (same discipline as #sentRender): the swap
+		// verdict is recorded on the request where the prompt first ships and
+		// replayed after. Only an undecided prompt — or one rebuilt
+		// mid-session, which rewrites the prefix regardless — takes today's
+		// plan verdict.
+		const frozenSystem = this.#sentSystemPrompt;
+		let systemSwap: SystemPromptImageTarget | undefined;
+		if (frozenSystem === undefined || (frozenSystem !== false && systemPromptTarget?.text !== frozenSystem.text)) {
+			if (plan.systemPrompt && userIndex >= 0 && systemPromptTarget) {
+				this.#sentSystemPrompt = systemPromptTarget;
+				systemSwap = systemPromptTarget;
+			} else {
+				this.#sentSystemPrompt = false;
+			}
+		} else if (frozenSystem) {
+			// Replay the frozen swap — but only onto a live carrier: without
+			// a user message the frames cannot ride, so this request ships
+			// the original without disturbing the freeze.
+			if (userIndex >= 0) systemSwap = frozenSystem;
+		}
+		if (systemSwap) {
+			const hash = Bun.hash(systemSwap.text);
 			let cached = this.#systemCache;
 			if (!cached || cached.hash !== hash) {
 				cached = {
 					hash,
 					frames:
-						(await this.frameSink?.framesFor(systemPromptTarget.text, shape, MAX_SYSTEM_PROMPT_FRAMES)) ??
-						(await snapcompact.renderMany(systemPromptTarget.text, {
+						(await this.frameSink?.framesFor(systemSwap.text, shape, MAX_SYSTEM_PROMPT_FRAMES)) ??
+						(await snapcompact.renderMany(systemSwap.text, {
 							shape,
 							maxFrames: MAX_SYSTEM_PROMPT_FRAMES,
 						})),
@@ -591,9 +631,9 @@ export class SnapcompactInlineTransformer {
 				typeof original.content === "string" ? [{ type: "text", text: original.content }] : original.content;
 			messages[userIndex] = {
 				...original,
-				content: [{ type: "text", text: systemPromptTarget.userNote }, ...frames, ...originalContent],
+				content: [{ type: "text", text: systemSwap.userNote }, ...frames, ...originalContent],
 			};
-			systemPrompt = systemPromptTarget.replacement;
+			systemPrompt = systemSwap.replacement;
 			changed = true;
 		}
 
@@ -602,12 +642,14 @@ export class SnapcompactInlineTransformer {
 	}
 
 	/**
-	 * Record every not-yet-decided tool result as shipped-text on transform
-	 * paths that let it reach the provider without imaging (text-only model,
+	 * Record every not-yet-decided item as shipped-text on transform paths
+	 * that let content reach the provider without imaging (text-only model,
 	 * exhausted image budget), so a later request cannot flip an item whose
-	 * text form already went out. See #sentRender for the invariant.
+	 * text form already went out. See #sentRender and #sentSystemPrompt for
+	 * the invariant.
 	 */
 	#freezeUnseenAsSentText(context: Context): void {
+		if (this.#sentSystemPrompt === undefined) this.#sentSystemPrompt = false;
 		if (!this.options.renderToolResults) return;
 		for (const message of context.messages) {
 			if (message.role !== "toolResult" || this.#sentRender.has(message.toolCallId)) continue;
