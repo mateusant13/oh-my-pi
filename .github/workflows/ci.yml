@@ -211,10 +211,10 @@ jobs:
 
    # Provides the native addons every downstream TS job installs. PRs never
    # build: they fetch the latest release's Linux x64 pair from the
-   # @oh-my-pi/pi-natives-linux-x64 npm leaf instead. The workspace loader
-   # skips its version sentinel for workspace loads, so release addons load
-   # fine under a newer checkout; a PR whose TS tests depend on changed
-   # native behavior fails visibly and the native side lands via main.
+   # @oh-my-pi/pi-natives-linux-x64 npm leaf instead. Workspace loads validate
+   # the package-version sentinel too; except for recognized compatible
+   # pre-sentinel addons, this leaf must match the checkout or native-dependent
+   # TS jobs fail during candidate load.
    # Main (kata, cluster remote cache) builds all Linux-hosted targets with
    # bazel. Job name says "bazel" for continuity with required checks.
    native_addons:

@@ -95,9 +95,8 @@ export function highlightCode(code: string, lang?: string, highlightTheme: Theme
 export function createHighlightStream(lang?: string, highlightTheme: Theme = theme): NativeHighlightStream | null {
 	const validLang = lang && nativeSupportsLanguage(lang) ? lang : undefined;
 	if (!validLang) return null;
-	// Workspace loads skip the natives version sentinel, so a stale local
-	// `.node` can omit `HighlightStream` after a pull. Napi constructors can
-	// also throw; callers degrade to plain text instead of aborting a render.
+	// Workspace loads reject mismatched versioned addons before exports are consumed.
+	// Keep this fallback for compatible pre-sentinel builds and N-API errors.
 	try {
 		if (typeof NativeHighlightStream !== "function") return null;
 		return new NativeHighlightStream(validLang, getHighlightColors(highlightTheme));

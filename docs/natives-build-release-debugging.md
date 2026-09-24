@@ -142,7 +142,7 @@ build --tls_certificate=infra/bazel-remote/ca.crt
 
 `.github/workflows/ci.yml` separates `rust_validate` from `native_addons`; TypeScript jobs depend only on `native_addons`.
 
-**Pull requests never build or validate Rust.** Native-affecting PRs are rare enough that they don't warrant a PR-side bazel build: `rust_validate` is skipped entirely (`if: github.event_name != 'pull_request'`), and `native_addons` fetches the latest release's Linux x64 addon pair from the `@oh-my-pi/pi-natives-linux-x64` npm leaf, smoke-loads both, and uploads them as the `native-addons` workflow artifact. The loader skips its version sentinel for workspace loads, so release-versioned addons load fine under a newer checkout. A PR whose TypeScript tests depend on changed native behavior fails visibly (and CI emits a notice on any native-touching PR); the Rust side is validated post-merge on main and again at release.
+**Pull requests never build or validate Rust.** Native-affecting PRs are rare enough that they don't warrant a PR-side bazel build: `rust_validate` is skipped entirely (`if: github.event_name != 'pull_request'`), and `native_addons` fetches the latest release's Linux x64 addon pair from the `@oh-my-pi/pi-natives-linux-x64` npm leaf, smoke-loads both, and uploads them as the `native-addons` workflow artifact. Workspace loads validate the package-version sentinel too; except for recognized compatible pre-sentinel addons, this leaf must match the checkout or native-dependent TypeScript jobs fail during candidate loading. A PR whose TypeScript tests depend on changed native behavior can also fail visibly (and CI emits a notice on any native-touching PR); the Rust side is validated post-merge on main and again at release.
 
 On non-PR events both jobs run on `omp-kata` pods against the cluster remote cache. `rust_validate` runs:
 
@@ -329,7 +329,7 @@ Generated declarations currently include exports from these Rust modules:
 - Unsupported platform tag: throws with supported platform list after probing fails.
 - No candidate could load: throws with full candidate error list and mode-specific remediation hints.
 - Embedded extraction and Windows staging problems: archive/mkdir/write/copy errors are recorded and included in final diagnostics if load fails.
-- Version mismatch: install/compiled loads that lack the package-version sentinel are rejected during candidate probing.
+- Version mismatch: candidates lacking the package-version sentinel are rejected during candidate probing unless they qualify for the compatible pre-sentinel path.
 
 ## Troubleshooting matrix
 

@@ -105,7 +105,7 @@ For each candidate:
 
 1. Emit a startup marker when enabled.
 2. `require(candidate)`.
-3. Unless this is workspace development, require the expected package-version sentinel function.
+3. Validate the expected package-version sentinel in every load mode, including workspace development; recognized compatible pre-sentinel addons retain their compatibility path.
 4. Call `__ompInstallTokioRuntime()` if the addon provides it.
 5. Best-effort remove valid semantic-version cache directories older than the current version.
 6. Return the bindings.
@@ -133,7 +133,7 @@ entrypoint evaluates or lazy wrapper is invoked
   -> extract matching embedded archive, if any
   -> otherwise stage Windows node_modules addon, if applicable
   -> require candidates in deterministic order
-       -> validate sentinel outside workspace development
+       -> validate package-version sentinel (or compatible pre-sentinel ABI)
        -> install optional post-load runtime
        -> best-effort clean older version caches
        -> return bindings

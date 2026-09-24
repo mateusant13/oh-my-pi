@@ -71,8 +71,13 @@ describe("issue 4812: pi-natives sentinel process-stale diagnosis", () => {
 		});
 	});
 
-	it("skips validation entirely in workspace dev", () => {
+	it("rejects workspace dev loads missing the expected version sentinel", () => {
 		const ctx = { ...ctxFor("16.3.11"), isWorkspaceLoad: true };
-		expect(() => validateLoadedBindings(ctx, { grep: () => {} }, unusedCandidate)).not.toThrow();
+		expect(() => validateLoadedBindings(ctx, { grep: () => {} }, unusedCandidate)).toThrow(
+			"reinstall to re-sync",
+		);
+		expect(() =>
+			validateLoadedBindings(ctx, { __piNativesV16_3_11: () => {}, grep: () => {} }, unusedCandidate),
+		).not.toThrow();
 	});
 });

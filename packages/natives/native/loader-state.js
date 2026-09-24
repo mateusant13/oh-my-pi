@@ -677,12 +677,9 @@ function isCompatiblePreSentinelNativeAddon(bindings, diskHasExpectedSentinel) {
 }
 
 export function validateLoadedBindings(ctx, bindings, candidate) {
-	// In workspace dev (running out of `packages/natives/native/` rather than a
-	// `node_modules` install or a compiled bundle) the local `.node` only gains
-	// the renamed sentinel after `bun --cwd=packages/natives run build`. Skip
-	// validation there so a stale post-pull dev tree boots while the rebuild
-	// completes; install and compiled-binary paths still validate.
-	if (ctx.isWorkspaceLoad) return;
+	// Every load mode, including workspace development, is checked for the
+	// package-version sentinel. The compatibility branch below still accepts
+	// recognized pre-sentinel addons; otherwise stale workspace addons fail here.
 	if (typeof bindings[ctx.versionSentinelExport] === "function") return;
 
 	// The expected sentinel is missing. Distinguish two failure modes by the

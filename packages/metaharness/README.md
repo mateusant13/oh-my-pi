@@ -175,8 +175,8 @@ known-correct fix for a failed task), `--concurrency` (default 8).
   registries work; task containers reach models via the host gateway.
 - **`--install source` reflects local TS changes** with no rebuild, but Rust
   natives load from the in-tree `packages/natives/native/pi_natives.linux-*.node`
-  prebuilds — rebuild those when Rust changes (the loader skips the version
-  sentinel for workspace loads, so a stale `.node` runs silently).
+  prebuilds — rebuild those when Rust changes; workspace loads reject mismatched
+  versioned addons at startup rather than silently running them.
 - **Source mode is single-arch.** The deps tree matches the docker daemon's
   native arch; trials on emulated images (e.g. x64 tasks on an arm64 host)
   fail setup with an arch-mismatch error — use `--binary` for those.

@@ -9,7 +9,7 @@ This page defines the public JS/TS boundary between `@oh-my-pi/pi-natives` calle
 3. `gen-enums.ts` reads the declarations, rewrites napi-rs `const enum` declarations to runtime-usable declarations, and replaces the marked block in `native/index.js` with explicit class/function exports and literal enum objects.
 4. `native/index.js` loads the addon and binds that generated root surface.
 
-There is no `NativeBindings` declaration-merging lifecycle or `packages/natives/src/<module>` wrapper convention. The loader validates only a release-version sentinel for install/compiled loads, not every public symbol.
+There is no `NativeBindings` declaration-merging lifecycle or `packages/natives/src/<module>` wrapper convention. The loader validates a release-version sentinel for every load mode, not every public symbol; recognized compatible pre-sentinel addons retain their compatibility path.
 
 ## Public entrypoints
 
@@ -87,8 +87,7 @@ Numeric and string enum declarations constrain TypeScript callers but do not by 
 ## Import and error behavior
 
 - Importing the root throws if no compatible addon candidate loads. Lazy desktop/clipboard subpaths defer that failure until their wrapper is called.
-- Install and compiled candidates missing the expected version sentinel are rejected during loading. Workspace-development candidates skip sentinel validation.
-- A resident prior-version addon can produce a restart-specific mismatch; a stale file on disk produces a reinstall diagnosis.
+- A candidate missing the expected version sentinel is rejected during loading unless it is a recognized compatible pre-sentinel addon. A resident prior-version addon can produce a restart-specific mismatch; a stale file on disk produces a reinstall diagnosis.
 - The loader does not check the full export set. A same-version incomplete build can therefore load and later expose `undefined` members.
 - N-API conversion errors throw or reject before Rust business logic runs. Native task and async failures reject their returned promises.
 

@@ -72,7 +72,7 @@ After an addon loads successfully, the loader best-effort removes cache director
 
 ## Load validation and runtime initialization
 
-Every install or compiled candidate must expose the version sentinel computed from `package.json#version`, such as `__piNativesV17_2_5`. Workspace loads skip this check. The loader does not validate a complete symbol list.
+Every candidate, including workspace candidates, is checked for the version sentinel computed from `package.json#version`, such as `__piNativesV17_2_5`; recognized compatible pre-sentinel addons retain their compatibility path. The loader does not validate a complete symbol list.
 
 After `require(...)` and sentinel validation, the loader calls `__ompInstallTokioRuntime()` when present. Rust deliberately avoids creating worker threads during `#[module_init]`, while the dynamic-loader lock is held. The post-load hook installs bounded Windows Tokio/Rayon pools; older addons without the hook use napi-rs defaults. Hook failure is best-effort and appears only in startup markers when enabled.
 
@@ -103,7 +103,7 @@ For the supporting-crate map, see [`native-crates.md`](./native-crates.md). For 
 1. A consumer imports the eager root or a lazy subpath.
 2. `loadNative()` computes mode, platform, variant, filenames, and ordered candidates.
 3. Embedded extraction or Windows staging may prepend a cache candidate.
-4. Candidates are required in order and install/compiled loads are sentinel-validated.
+4. Candidates are required in order and each is sentinel-validated, with the compatible pre-sentinel exception.
 5. The optional post-load runtime hook runs, then stale cache versions are cleaned up best-effort.
 6. The root binds generated named exports; lazy subpaths invoke selected bindings through wrappers.
 7. Callers invoke N-API functions/classes; napi-rs performs argument and result conversion.

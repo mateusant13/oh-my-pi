@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Workspace native loads now validate the package-version sentinel; mismatched versioned addons fail with reinstall guidance while the recognized compatible pre-sentinel path remains available.
+
 ## [18.1.15] - 2026-09-08
 
 ### Fixed
